@@ -51,9 +51,15 @@ jobs:
           LINES_ADDED=${{ steps.pr_info.outputs.lines_added }}
           
           BASE_REWARD=10
-          FILE_BONUS=$((FILES_CHANGED > 20 ? 20 : FILES_CHANGED))
+          if [ $FILES_CHANGED -gt 20 ]; then
+            FILE_BONUS=20
+          else
+            FILE_BONUS=$FILES_CHANGED
+          fi
           LINES_BONUS=$((LINES_ADDED / 10))
-          LINES_BONUS=$((LINES_BONUS > 30 ? 30 : LINES_BONUS))
+          if [ $LINES_BONUS -gt 30 ]; then
+            LINES_BONUS=30
+          fi
           
           TOTAL_REWARD=$((BASE_REWARD + FILE_BONUS + LINES_BONUS))
           
