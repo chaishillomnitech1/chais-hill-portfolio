@@ -1,0 +1,169 @@
+name: Reward and Mint (Pilot)
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  reward-contributor:
+    name: Reward Contributor (Testnet)
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get PR and contributor info
+        id: pr_info
+        run: |
+          CONTRIBUTOR="${{ github.event.pull_request.user.login }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          FILES_CHANGED=$(echo "${{ github.event.pull_request.changed_files }}")
+          LINES_ADDED=$(echo "${{ github.event.pull_request.additions }}")
+          
+          echo "contributor=$CONTRIBUTOR" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          echo "lines_added=$LINES_ADDED" >> $GITHUB_OUTPUT
+
+      - name: Calculate reward amount
+        id: calculate_reward
+        run: |
+          # Simple reward calculation (testnet tokens)
+          # Base: 10 tokens
+          # +1 token per file changed (max 20)
+          # +1 token per 10 lines added (max 30)
+          
+          FILES_CHANGED=${{ steps.pr_info.outputs.files_changed }}
+          LINES_ADDED=${{ steps.pr_info.outputs.lines_added }}
+          
+          BASE_REWARD=10
+          FILE_BONUS=$((FILES_CHANGED > 20 ? 20 : FILES_CHANGED))
+          LINES_BONUS=$((LINES_ADDED / 10))
+          LINES_BONUS=$((LINES_BONUS > 30 ? 30 : LINES_BONUS))
+          
+          TOTAL_REWARD=$((BASE_REWARD + FILE_BONUS + LINES_BONUS))
+          
+          echo "amount=$TOTAL_REWARD" >> $GITHUB_OUTPUT
+          echo "Calculated reward: $TOTAL_REWARD testnet tokens"
+
+      - name: Send reward (Testnet)
+        id: send_reward
+        run: |
+          # Simulate reward transaction on Mumbai testnet
+          # In production, this would interact with actual smart contract
+          
+          cat > reward_transaction.js << 'EOF'
+          const https = require('https');
+          
+          // This is a placeholder for actual reward logic
+          // In production, this would use ethers.js or web3.js
+          
+          const rewardData = {
+            contributor: process.env.CONTRIBUTOR,
+            prNumber: process.env.PR_NUMBER,
+            amount: process.env.REWARD_AMOUNT,
+            network: 'mumbai',
+            pilot: true
+          };
+          
+          console.log('🎁 Reward Transaction (PILOT/TESTNET):');
+          console.log(JSON.stringify(rewardData, null, 2));
+          console.log('\n⚠️  This is a pilot program using testnet tokens.');
+          console.log('No real value is transferred.');
+          
+          // In production, uncomment and implement actual transaction:
+          // const { ethers } = require('ethers');
+          // const provider = new ethers.providers.JsonRpcProvider(process.env.ALCHEMY_MUMBAI_URL);
+          // const wallet = new ethers.Wallet(process.env.REWARDS_PRIVATE_KEY, provider);
+          // const contract = new ethers.Contract(process.env.REWARDS_CONTRACT_ADDRESS, ABI, wallet);
+          // const tx = await contract.mintReward(contributorAddress, amount);
+          // console.log('Transaction hash:', tx.hash);
+          
+          process.exit(0);
+          EOF
+          
+          CONTRIBUTOR="${{ steps.pr_info.outputs.contributor }}"
+          PR_NUMBER="${{ steps.pr_info.outputs.pr_number }}"
+          REWARD_AMOUNT="${{ steps.calculate_reward.outputs.amount }}"
+          
+          node reward_transaction.js
+          
+          # For pilot, we just log the transaction
+          echo "status=pilot_success" >> $GITHUB_OUTPUT
+          echo "tx_hash=0xPILOT_TESTNET_TX_$(date +%s)" >> $GITHUB_OUTPUT
+        env:
+          CONTRIBUTOR: ${{ steps.pr_info.outputs.contributor }}
+          PR_NUMBER: ${{ steps.pr_info.outputs.pr_number }}
+          REWARD_AMOUNT: ${{ steps.calculate_reward.outputs.amount }}
+          REWARDS_PRIVATE_KEY: ${{ secrets.REWARDS_PRIVATE_KEY }}
+          ALCHEMY_MUMBAI_URL: ${{ secrets.ALCHEMY_MUMBAI_URL }}
+          REWARDS_CONTRACT_ADDRESS: ${{ secrets.REWARDS_CONTRACT_ADDRESS }}
+
+      - name: Comment reward on PR
+        if: steps.send_reward.outputs.status == 'pilot_success'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const comment = `## 🎁 Contribution Reward (PILOT)
+            
+            **Congratulations @${{ steps.pr_info.outputs.contributor }}!**
+            
+            Your contribution has been rewarded with **${{ steps.calculate_reward.outputs.amount }} testnet tokens** on Polygon Mumbai.
+            
+            **Reward Details:**
+            - Base reward: 10 tokens
+            - File bonus: ${{ steps.pr_info.outputs.files_changed }} tokens
+            - Lines bonus: ~${{ steps.calculate_reward.outputs.amount - 10 - steps.pr_info.outputs.files_changed }} tokens
+            - **Total: ${{ steps.calculate_reward.outputs.amount }} tokens**
+            
+            **Transaction Info:**
+            - Network: Polygon Mumbai (Testnet)
+            - Status: Pilot/Simulated
+            - TX Hash: \`${{ steps.send_reward.outputs.tx_hash }}\`
+            
+            ---
+            
+            > ⚠️ **Pilot Program:** This is a testnet pilot using Mumbai testnet tokens with no real value.
+            > The rewards system is being tested before mainnet deployment.
+            >
+            > 📊 Your contribution stats:
+            > - PR #${{ steps.pr_info.outputs.pr_number }}: "${{ steps.pr_info.outputs.pr_title }}"
+            > - Files changed: ${{ steps.pr_info.outputs.files_changed }}
+            > - Lines added: ${{ steps.pr_info.outputs.lines_added }}
+            >
+            > Thank you for contributing to the project! 🙏`;
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Rewards Summary (Pilot)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Contributor:** @${{ steps.pr_info.outputs.contributor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**PR:** #${{ steps.pr_info.outputs.pr_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Reward Amount:** ${{ steps.calculate_reward.outputs.amount }} testnet tokens" >> $GITHUB_STEP_SUMMARY
+          echo "**Network:** Polygon Mumbai (Testnet)" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ steps.send_reward.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ Pilot program - testnet only, no real value" >> $GITHUB_STEP_SUMMARY
