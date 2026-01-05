@@ -1,0 +1,36 @@
+# CODEOWNERS file for chais-hill-portfolio
+# This file defines individuals or teams responsible for code review and approval
+# 
+# For more information on CODEOWNERS, see:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repository
+* @chaishillomnitech1
+
+# GitHub Actions and CI/CD workflows
+/.github/ @chaishillomnitech1
+
+# Documentation
+*.md @chaishillomnitech1
+/docs/ @chaishillomnitech1
+
+# Configuration files
+*.json @chaishillomnitech1
+*.yml @chaishillomnitech1
+*.yaml @chaishillomnitech1
+*.toml @chaishillomnitech1
+
+# Source code (adjust patterns as project grows)
+/src/ @chaishillomnitech1
+/lib/ @chaishillomnitech1
+/app/ @chaishillomnitech1
+
+# Tests
+/test/ @chaishillomnitech1
+/tests/ @chaishillomnitech1
+*.test.* @chaishillomnitech1
+*.spec.* @chaishillomnitech1
+
+# Security and compliance
+/SECURITY.md @chaishillomnitech1
+/CODEOWNERS @chaishillomnitech1
