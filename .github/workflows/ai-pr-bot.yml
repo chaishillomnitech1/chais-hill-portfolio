@@ -1,0 +1,144 @@
+name: AI PR Bot
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  ai-review:
+    name: AI Code Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get PR diff
+        id: diff
+        run: |
+          # Get the diff between base and head
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          DIFF=$(git diff origin/${{ github.event.pull_request.base.ref }}...${{ github.sha }})
+          
+          # Save diff to file for processing
+          echo "$DIFF" > pr_diff.txt
+          
+          # Get stats
+          FILES_CHANGED=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...${{ github.sha }} | wc -l)
+          LINES_ADDED=$(git diff --numstat origin/${{ github.event.pull_request.base.ref }}...${{ github.sha }} | awk '{sum+=$1} END {print sum}')
+          LINES_REMOVED=$(git diff --numstat origin/${{ github.event.pull_request.base.ref }}...${{ github.sha }} | awk '{sum+=$2} END {print sum}')
+          
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          echo "lines_added=$LINES_ADDED" >> $GITHUB_OUTPUT
+          echo "lines_removed=$LINES_REMOVED" >> $GITHUB_OUTPUT
+
+      - name: AI Code Review Analysis
+        id: ai_review
+        run: |
+          # Create a conservative AI review using OpenAI API
+          cat > review_prompt.txt << 'EOF'
+          You are a conservative code reviewer. Review the following code changes and provide:
+          1. Critical issues (security, bugs, breaking changes) - be very selective
+          2. Best practice suggestions - only mention important ones
+          3. Positive feedback - highlight good patterns
+          
+          Be concise and focus on what truly matters. Do not nitpick. Use markdown format.
+          Tone: Constructive and encouraging, not critical unless necessary.
+          
+          Code diff to review:
+          EOF
+          
+          cat pr_diff.txt >> review_prompt.txt
+          
+          # Call OpenAI API with conservative settings
+          REVIEW_RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.OPENAI_API_KEY }}" \
+            -d '{
+              "model": "gpt-4",
+              "messages": [
+                {
+                  "role": "system",
+                  "content": "You are a conservative, helpful code reviewer. Focus on important issues only."
+                },
+                {
+                  "role": "user",
+                  "content": "'"$(cat review_prompt.txt | jq -Rs .)"'"
+                }
+              ],
+              "temperature": 0.3,
+              "max_tokens": 1000
+            }' || echo '{"choices":[{"message":{"content":"AI review temporarily unavailable. Please proceed with manual review."}}]}')
+          
+          # Extract review content
+          REVIEW=$(echo "$REVIEW_RESPONSE" | jq -r '.choices[0].message.content // "AI review unavailable"')
+          
+          # Save to file for next step
+          echo "$REVIEW" > ai_review.txt
+          
+          # Check if review was successful
+          if echo "$REVIEW" | grep -q "unavailable"; then
+            echo "status=skipped" >> $GITHUB_OUTPUT
+          else
+            echo "status=completed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post AI Review Comment
+        if: steps.ai_review.outputs.status == 'completed'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const aiReview = fs.readFileSync('ai_review.txt', 'utf8');
+            
+            const comment = `## 🤖 AI Code Review
+            
+            **PR Stats:**
+            - Files changed: ${{ steps.diff.outputs.files_changed }}
+            - Lines added: ${{ steps.diff.outputs.lines_added }}
+            - Lines removed: ${{ steps.diff.outputs.lines_removed }}
+            
+            ---
+            
+            ${aiReview}
+            
+            ---
+            
+            > ⚠️ **Note:** This is an AI-generated review using conservative prompts. It is advisory only and does not replace human review. Please use your judgment when addressing suggestions.
+            >
+            > 🔒 **No auto-merge:** This bot only provides feedback. All PRs require manual review and approval by @chaishillomnitech1.`;
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### AI PR Bot Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ steps.ai_review.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Files Changed:** ${{ steps.diff.outputs.files_changed }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Lines Added:** ${{ steps.diff.outputs.lines_added }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Lines Removed:** ${{ steps.diff.outputs.lines_removed }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Review comment posted to PR #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
